@@ -13,6 +13,7 @@ coil = "3.4.0"
 koin = "4.1.1"
 cameraX = "1.5.3"
 mlkitText = "16.0.1"
+mlkitBarcode = "17.3.0"
 revenueCat = "9.29.0"
 
 [libraries]
@@ -42,6 +43,7 @@ androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", 
 androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "cameraX" }
 androidx-camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "cameraX" }
 mlkit-text-recognition = { group = "com.google.mlkit", name = "text-recognition", version.ref = "mlkitText" }
+mlkit-barcode-scanning = { group = "com.google.mlkit", name = "barcode-scanning", version.ref = "mlkitBarcode" }
 revenuecat-purchases = { group = "com.revenuecat.purchases", name = "purchases", version.ref = "revenueCat" }
 
 [plugins]

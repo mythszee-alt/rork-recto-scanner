@@ -21,6 +21,7 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -61,6 +62,7 @@ fun DocumentScreen(
     document: RectoDocument,
     onAction: (RectoAction) -> Unit,
     onBack: () -> Unit,
+    onExtractText: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -134,6 +136,9 @@ fun DocumentScreen(
                         }, "Share ${document.title}"))
                     }
                 }, enabled = !isExporting, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.Share, null); Text(if (isExporting) "  WORKING" else "  SHARE") }
+            }
+            OutlinedButton(onClick = onExtractText, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Outlined.TextFields, null); Text("  EXTRACT TEXT (OCR)")
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick = { onAction(RectoAction.Duplicate(document.id)); message = "Document duplicated" }, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.ContentCopy, null); Text("  DUPLICATE") }

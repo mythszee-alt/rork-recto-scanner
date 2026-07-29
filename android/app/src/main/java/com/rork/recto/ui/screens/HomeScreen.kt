@@ -28,6 +28,8 @@ import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.PhotoLibrary
+import androidx.compose.material.icons.rounded.QrCodeScanner
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
@@ -59,6 +61,7 @@ fun HomeScreen(
     navController: NavController,
     uiState: RectoUiState,
     onAction: (RectoAction) -> Unit,
+    onImportImages: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val filters = listOf("ALL", "VERIFIED", "RECENT")
@@ -102,6 +105,21 @@ fun HomeScreen(
                     Spacer(Modifier.height(14.dp))
                 }
                 ProofCheckHero(uiState.proofScore)
+                Spacer(Modifier.height(16.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    QuickAction(
+                        icon = Icons.Rounded.QrCodeScanner,
+                        label = "SCAN CODE",
+                        modifier = Modifier.weight(1f),
+                        onClick = { navController.navigate("barcode") },
+                    )
+                    QuickAction(
+                        icon = Icons.Rounded.PhotoLibrary,
+                        label = "IMPORT",
+                        modifier = Modifier.weight(1f),
+                        onClick = onImportImages,
+                    )
+                }
                 Spacer(Modifier.height(24.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     filters.forEach { filter ->
@@ -126,6 +144,25 @@ fun HomeScreen(
             ) { document ->
                 DocumentRow(document, onClick = { navController.navigate("document/${document.id}") })
             }
+        }
+    }
+}
+
+@Composable
+private fun QuickAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(18.dp),
+        modifier = modifier.clickable(onClick = onClick)
+    ) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = CalibrationCyan, modifier = Modifier.size(20.dp))
+            Text("  $label", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface)
         }
     }
 }

@@ -27,8 +27,11 @@ data class AppUiState(
     val packages: List<Package> = emptyList(),
     val selectedPackageId: String? = null,
     val isBillingConfigured: Boolean = BuildConfig.REVENUECAT_API_KEY.isNotBlank(),
+    val isAccountServiceConfigured: Boolean = BuildConfig.SUPABASE_URL.isNotBlank() && BuildConfig.SUPABASE_ANON_KEY.isNotBlank(),
     val hasProAccess: Boolean = false,
-    val isFreeMode: Boolean = false
+    val isFreeMode: Boolean = false,
+    /** Signed-out local-only use: scanning works, cloud backup does not. */
+    val isGuest: Boolean = false
 )
 
 class AppViewModel(application: Application) : AndroidViewModel(application) {
@@ -40,10 +43,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         AppUiState(
             gate = when {
                 !preferences.getBoolean("onboarding_complete", false) -> AppGate.ONBOARDING
-                restored == null -> AppGate.AUTH
-                else -> AppGate.PAYWALL
+                restored != null -> AppGate.PAYWALL
+                // Guest choice is remembered so the app doesn't bounce back to
+                // the sign-in wall on every launch.
+                preferences.getBoolean("guest_mode", false) -> AppGate.LIBRARY
+                else -> AppGate.AUTH
             },
-            session = restored
+            session = restored,
+            isGuest = restored == null && preferences.getBoolean("guest_mode", false),
+            isFreeMode = restored == null && preferences.getBoolean("guest_mode", false)
         )
     )
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
@@ -58,6 +66,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun completeOnboarding() {
         preferences.edit().putBoolean("onboarding_complete", true).apply()
         _uiState.update { it.copy(gate = if (it.session == null) AppGate.AUTH else AppGate.PAYWALL) }
+    }
+
+    /**
+     * Enter the app without an account. Scanning, editing and export all work
+     * on-device; only cloud backup needs a signed-in account. This also keeps
+     * the app usable when the account service isn't configured yet.
+     */
+    fun continueAsGuest() {
+        preferences.edit().putBoolean("guest_mode", true).apply()
+        _uiState.update { it.copy(gate = AppGate.LIBRARY, isGuest = true, isFreeMode = true, message = null) }
+    }
+
+    /** Leaves guest mode and returns to the sign-in wall. */
+    fun exitGuestMode() {
+        preferences.edit().putBoolean("guest_mode", false).apply()
+        _uiState.update { it.copy(gate = AppGate.AUTH, isGuest = false, message = null) }
     }
 
     fun setAuthMode(mode: AuthMode) = _uiState.update { it.copy(authMode = mode, message = null) }
@@ -87,7 +111,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         _uiState.update { it.copy(isLoading = false, message = "Check your inbox to confirm your account, then sign in", authMode = AuthMode.SIGN_IN) }
                     } else {
                         billing.identify(session.user.id)
-                        _uiState.update { it.copy(isLoading = false, session = session, gate = AppGate.PAYWALL) }
+                        preferences.edit().putBoolean("guest_mode", false).apply()
+                        _uiState.update { it.copy(isLoading = false, session = session, gate = AppGate.PAYWALL, isGuest = false) }
                         loadPackages()
                     }
                 },
@@ -103,7 +128,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         auth.acceptOAuthCallback(encoded).fold(
             onSuccess = { session ->
                 billing.identify(session.user.id)
-                _uiState.update { it.copy(session = session, gate = AppGate.PAYWALL, message = null) }
+                preferences.edit().putBoolean("guest_mode", false).apply()
+                _uiState.update { it.copy(session = session, gate = AppGate.PAYWALL, message = null, isGuest = false) }
                 loadPackages()
             },
             onFailure = { error -> _uiState.update { it.copy(message = error.message) } }
@@ -170,6 +196,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 onSuccess = {
                     auth.signOut(session)
                     billing.logOut()
+                    preferences.edit().putBoolean("guest_mode", false).apply()
                     _uiState.value = AppUiState(gate = AppGate.AUTH, message = "Deletion scheduled. Your cloud account and backups will be erased after 30 days.")
                 },
                 onFailure = { error -> _uiState.update { it.copy(isLoading = false, message = error.message) } }
@@ -181,6 +208,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             auth.signOut(_uiState.value.session)
             billing.logOut()
+            preferences.edit().putBoolean("guest_mode", false).apply()
             _uiState.value = AppUiState(gate = AppGate.AUTH)
         }
     }
