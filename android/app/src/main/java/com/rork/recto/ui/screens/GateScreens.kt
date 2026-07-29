@@ -61,6 +61,13 @@ import com.revenuecat.purchases.Package
 import com.rork.recto.ui.theme.CalibrationCyan
 import com.rork.recto.ui.theme.RegistrationMagenta
 
+// Google sign-in needs the Google provider configured in the Supabase
+// dashboard (client ID/secret + the recto://auth redirect registered) before
+// it can work end to end. Until that's set up, keep email/password as the
+// only path so testers aren't stuck at a dead end. Flip back to true once
+// Google is configured.
+private const val GOOGLE_SIGN_IN_ENABLED = false
+
 private data class OnboardingPage(val eyebrow: String, val title: String, val body: String, val icon: ImageVector, val accent: Color)
 
 @Composable
@@ -130,7 +137,7 @@ fun AuthScreen(state: AppUiState, viewModel: AppViewModel, modifier: Modifier = 
             Button(onClick = { viewModel.authenticate(email, password) }, enabled = !state.isLoading, modifier = Modifier.fillMaxWidth().height(54.dp)) {
                 if (state.isLoading) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp) else Text(when (state.authMode) { AuthMode.SIGN_IN -> "SIGN IN"; AuthMode.CREATE -> "CREATE ACCOUNT"; AuthMode.RESET -> "SEND RESET LINK" }, fontWeight = FontWeight.Black)
             }
-            if (state.authMode != AuthMode.RESET) {
+            if (state.authMode != AuthMode.RESET && GOOGLE_SIGN_IN_ENABLED) {
                 Spacer(Modifier.height(12.dp))
                 OutlinedButton(onClick = {
                     viewModel.googleUrl().fold(
