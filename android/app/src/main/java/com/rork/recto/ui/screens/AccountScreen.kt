@@ -52,17 +52,47 @@ fun AccountScreen(state: AppUiState, appViewModel: AppViewModel, onBack: () -> U
         }
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(if (state.hasProAccess) "RECTO PRO" else "RECTO FREE", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
-            Text(if (state.hasProAccess) "Subscription active" else "Free access", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Text(if (state.hasProAccess) "Manage billing and cancellation in Google Play." else "Upgrade for encrypted backup, verified redaction and every export format.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                when {
+                    state.session == null -> "RECTO / ON THIS DEVICE"
+                    state.hasProAccess -> "RECTO PRO"
+                    else -> "RECTO FREE"
+                },
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Black,
+            )
+            Text(
+                when {
+                    state.session == null -> "No account"
+                    state.hasProAccess -> "Subscription active"
+                    else -> "Free access"
+                },
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                when {
+                    state.session == null -> "Your scans are saved on this device only. Sign in to turn on encrypted cloud backup and restore."
+                    state.hasProAccess -> "Manage billing and cancellation in Google Play."
+                    else -> "Upgrade for encrypted backup, verified redaction and every export format."
+                },
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             if (!state.hasProAccess) Button(onClick = appViewModel::showPaywall, modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) { Text("VIEW RECTO PRO") }
             HorizontalDivider(Modifier.padding(vertical = 16.dp))
             ListItem(headlineContent = { Text("Restore purchases") }, leadingContent = { Icon(Icons.Outlined.Restore, null) }, modifier = Modifier.fillMaxWidth().clickable(onClick = appViewModel::restorePurchases))
             ListItem(headlineContent = { Text("Export my account data") }, supportingContent = { Text("Creates a portable archive of account metadata and local documents") }, leadingContent = { Icon(Icons.Outlined.Download, null) })
             ListItem(headlineContent = { Text("Privacy and retention") }, supportingContent = { Text("What Recto stores and when it is erased") }, leadingContent = { Icon(Icons.Outlined.Security, null) }, modifier = Modifier.fillMaxWidth().clickable { showPrivacy = true })
-            Row(Modifier.fillMaxWidth().padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = appViewModel::signOut, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.Logout, null); Text("  SIGN OUT") }
-                Button(onClick = { showDeletion = true }, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.DeleteForever, null); Text("  DELETE") }
+            if (state.session == null) {
+                Button(onClick = appViewModel::exitGuestMode, modifier = Modifier.fillMaxWidth().padding(top = 20.dp)) {
+                    Text("SIGN IN TO ENABLE CLOUD BACKUP", fontWeight = FontWeight.Bold)
+                }
+            } else {
+                Row(Modifier.fillMaxWidth().padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(onClick = appViewModel::signOut, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.Logout, null); Text("  SIGN OUT") }
+                    Button(onClick = { showDeletion = true }, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.DeleteForever, null); Text("  DELETE") }
+                }
             }
             TextButton(onClick = { showPrivacy = true }, Modifier.fillMaxWidth()) { Text("PRIVACY • TERMS • DELETION POLICY") }
         }

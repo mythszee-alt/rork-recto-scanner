@@ -121,7 +121,10 @@ fun AuthScreen(state: AppUiState, viewModel: AppViewModel, modifier: Modifier = 
     val context = LocalContext.current
     val title = when (state.authMode) { AuthMode.SIGN_IN -> "Welcome back"; AuthMode.CREATE -> "Create your account"; AuthMode.RESET -> "Reset your password" }
     Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+        ) {
             Text("RECTO", color = CalibrationCyan, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black)
             Spacer(Modifier.height(12.dp))
             Text(title, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black)
@@ -132,9 +135,17 @@ fun AuthScreen(state: AppUiState, viewModel: AppViewModel, modifier: Modifier = 
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text("Password") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
             }
+            if (!state.isAccountServiceConfigured) {
+                Text(
+                    "Accounts aren't connected in this build, so sign-in won't work yet. You can still scan, edit and export — everything stays on this device.",
+                    Modifier.padding(top = 14.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             state.message?.let { Text(it, Modifier.padding(top = 12.dp), color = if (it.contains("sent") || it.contains("inbox")) CalibrationCyan else MaterialTheme.colorScheme.error) }
             Spacer(Modifier.height(20.dp))
-            Button(onClick = { viewModel.authenticate(email, password) }, enabled = !state.isLoading, modifier = Modifier.fillMaxWidth().height(54.dp)) {
+            Button(onClick = { viewModel.authenticate(email, password) }, enabled = !state.isLoading && state.isAccountServiceConfigured, modifier = Modifier.fillMaxWidth().height(54.dp)) {
                 if (state.isLoading) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp) else Text(when (state.authMode) { AuthMode.SIGN_IN -> "SIGN IN"; AuthMode.CREATE -> "CREATE ACCOUNT"; AuthMode.RESET -> "SEND RESET LINK" }, fontWeight = FontWeight.Black)
             }
             if (state.authMode != AuthMode.RESET && GOOGLE_SIGN_IN_ENABLED) {
@@ -156,6 +167,19 @@ fun AuthScreen(state: AppUiState, viewModel: AppViewModel, modifier: Modifier = 
             }
             if (state.authMode == AuthMode.SIGN_IN) TextButton(onClick = { viewModel.setAuthMode(AuthMode.RESET) }, Modifier.align(Alignment.CenterHorizontally)) { Text("Forgot password?") }
             if (state.authMode == AuthMode.RESET) TextButton(onClick = { viewModel.setAuthMode(AuthMode.SIGN_IN) }, Modifier.align(Alignment.CenterHorizontally)) { Text("Back to sign in") }
+
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = viewModel::continueAsGuest,
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+            ) { Text("SCAN WITHOUT AN ACCOUNT", fontWeight = FontWeight.Bold) }
+            Text(
+                "Documents stay on this device. Sign in later to enable encrypted cloud backup.",
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
