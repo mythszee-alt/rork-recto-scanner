@@ -23,11 +23,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -95,6 +97,10 @@ fun HomeScreen(
                     singleLine = true
                 )
                 Spacer(Modifier.height(22.dp))
+                if (uiState.isSyncing || uiState.message != null) {
+                    SyncBanner(isSyncing = uiState.isSyncing, isError = uiState.isSyncError, message = uiState.message)
+                    Spacer(Modifier.height(14.dp))
+                }
                 ProofCheckHero(uiState.proofScore)
                 Spacer(Modifier.height(24.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -119,6 +125,28 @@ fun HomeScreen(
                 key = { it.id }
             ) { document ->
                 DocumentRow(document, onClick = { navController.navigate("document/${document.id}") })
+            }
+        }
+    }
+}
+
+@Composable
+private fun SyncBanner(isSyncing: Boolean, isError: Boolean, message: String?) {
+    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            when {
+                isSyncing -> {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Text("  Syncing with your account…", style = MaterialTheme.typography.labelMedium)
+                }
+                isError -> {
+                    Icon(Icons.Rounded.CloudOff, null, tint = RegistrationMagenta, modifier = Modifier.size(16.dp))
+                    Text("  ${message.orEmpty()}", style = MaterialTheme.typography.labelMedium)
+                }
+                else -> {
+                    Icon(Icons.Rounded.CloudDone, null, tint = SignalGreen, modifier = Modifier.size(16.dp))
+                    Text("  ${message.orEmpty()}", style = MaterialTheme.typography.labelMedium)
+                }
             }
         }
     }
