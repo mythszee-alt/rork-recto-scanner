@@ -5,6 +5,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.rork.recto.data.AuthRepository
 import com.rork.recto.data.CloudSyncService
+import com.rork.recto.data.EncryptionKeyRepository
+import com.rork.recto.data.RectoSession
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,7 +40,9 @@ data class RectoUiState(
     val searchQuery: String = "",
     val proofScore: Int = 94,
     val capturedPages: List<String> = emptyList(),
-    val message: String? = null
+    val message: String? = null,
+    val isSyncing: Boolean = false,
+    val isSyncError: Boolean = false
 )
 
 sealed interface RectoAction {
@@ -54,6 +58,7 @@ sealed interface RectoAction {
     data class Restore(val id: String) : RectoAction
     data object ClearCapture : RectoAction
     data object Capture : RectoAction
+    data object RestoreFromCloud : RectoAction
 }
 
 class RectoViewModel(application: Application) : AndroidViewModel(application) {
@@ -61,8 +66,15 @@ class RectoViewModel(application: Application) : AndroidViewModel(application) {
     private val json = Json { ignoreUnknownKeys = true }
     private val authRepository = AuthRepository(application)
     private val cloudSync = CloudSyncService(application)
+    private val encryptionKeys = EncryptionKeyRepository(application)
     private val _uiState = MutableStateFlow(RectoUiState(documents = loadDocuments()))
     val uiState: StateFlow<RectoUiState> = _uiState.asStateFlow()
+
+    init {
+        authRepository.restoredSession()?.let { session ->
+            viewModelScope.launch { restoreFromCloud(session) }
+        }
+    }
 
     fun onAction(action: RectoAction) {
         when (action) {
@@ -80,11 +92,55 @@ class RectoViewModel(application: Application) : AndroidViewModel(application) {
             is RectoAction.Duplicate -> updateDocuments { documents ->
                 documents.firstOrNull { it.id == action.id }?.let { documents + it.copy(id = UUID.randomUUID().toString(), title = "${it.title} copy") } ?: documents
             }
-            is RectoAction.Delete -> updateDocuments { documents -> documents.map { if (it.id == action.id) it.copy(isDeleted = true) else it } }
-            is RectoAction.Restore -> updateDocuments { documents -> documents.map { if (it.id == action.id) it.copy(isDeleted = false) else it } }
+            is RectoAction.Delete -> {
+                updateDocuments { documents -> documents.map { if (it.id == action.id) it.copy(isDeleted = true) else it } }
+                syncDeletionState(action.id, deleted = true)
+            }
+            is RectoAction.Restore -> {
+                updateDocuments { documents -> documents.map { if (it.id == action.id) it.copy(isDeleted = false) else it } }
+                syncDeletionState(action.id, deleted = false)
+            }
             RectoAction.ClearCapture -> _uiState.update { it.copy(capturedPages = emptyList()) }
             RectoAction.Capture -> Unit
+            RectoAction.RestoreFromCloud -> authRepository.restoredSession()?.let { session ->
+                viewModelScope.launch { restoreFromCloud(session) }
+            }
         }
+    }
+
+    private suspend fun restoreFromCloud(session: RectoSession) {
+        _uiState.update { it.copy(isSyncing = true) }
+        val key = encryptionKeys.resolve(session).getOrNull()
+        if (key == null) {
+            _uiState.update { it.copy(isSyncing = false, isSyncError = true, message = "Couldn't unlock encrypted backups. Try again shortly.") }
+            return
+        }
+        cloudSync.listCloudDocuments(session).fold(
+            onSuccess = { remoteDocs ->
+                val localIds = _uiState.value.documents.map { it.id }.toSet()
+                val missing = remoteDocs.filter { it.id !in localIds }
+                var restoredCount = 0
+                for (remote in missing) {
+                    cloudSync.download(session, remote, key).onSuccess { document ->
+                        updateDocuments { it + document }
+                        restoredCount += 1
+                    }
+                }
+                _uiState.update {
+                    it.copy(
+                        isSyncing = false,
+                        isSyncError = false,
+                        message = if (restoredCount > 0) "Restored $restoredCount document${if (restoredCount == 1) "" else "s"} from your account" else null,
+                    )
+                }
+            },
+            onFailure = { _uiState.update { state -> state.copy(isSyncing = false, isSyncError = true, message = "Cloud sync is unavailable right now") } },
+        )
+    }
+
+    private fun syncDeletionState(documentId: String, deleted: Boolean) {
+        val session = authRepository.restoredSession() ?: return
+        viewModelScope.launch { cloudSync.syncDeletion(session, documentId, deleted) }
     }
 
     private fun saveCapture(title: String) {
@@ -101,12 +157,17 @@ class RectoViewModel(application: Application) : AndroidViewModel(application) {
             pagePaths = pages
         )
         updateDocuments { listOf(document) + it }
-        _uiState.update { it.copy(capturedPages = emptyList(), message = "Document saved on this device") }
+        _uiState.update { it.copy(capturedPages = emptyList(), message = "Document saved on this device", isSyncError = false) }
         authRepository.restoredSession()?.let { session ->
             viewModelScope.launch {
-                cloudSync.upload(session, document).fold(
+                val key = encryptionKeys.resolve(session).getOrNull()
+                if (key == null) {
+                    _uiState.update { state -> state.copy(isSyncError = true, message = "Saved locally. Encrypted backup will retry when online.") }
+                    return@launch
+                }
+                cloudSync.upload(session, document, key).fold(
                     onSuccess = { updateDocuments { documents -> documents.map { if (it.id == document.id) it.copy(detail = "JUST NOW · ENCRYPTED BACKUP") else it } } },
-                    onFailure = { _uiState.update { state -> state.copy(message = "Saved locally. Encrypted backup will retry when online.") } }
+                    onFailure = { _uiState.update { state -> state.copy(isSyncError = true, message = "Saved locally. Encrypted backup will retry when online.") } }
                 )
             }
         }

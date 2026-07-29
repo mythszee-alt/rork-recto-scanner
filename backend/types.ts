@@ -45,6 +45,24 @@ export type Database = {
         }
         Relationships: []
       }
+      encryption_keys: {
+        Row: {
+          created_at: string
+          user_id: string
+          wrapped_key: string
+        }
+        Insert: {
+          created_at?: string
+          user_id: string
+          wrapped_key: string
+        }
+        Update: {
+          created_at?: string
+          user_id?: string
+          wrapped_key?: string
+        }
+        Relationships: []
+      }
       documents: {
         Row: {
           created_at: string
