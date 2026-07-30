@@ -13,8 +13,9 @@ android {
         applicationId = "com.rork.recto"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = (project.findProperty("RECTO_VERSION_CODE") ?: "1").toString().toInt()
+        versionName = (project.findProperty("RECTO_VERSION_NAME") ?: "1.0").toString()
+
         // Config comes from an environment variable (how Rork/CI inject it), or
         // failing that a Gradle property. The Gradle-property fallback exists
         // because Android Studio is usually launched from a desktop launcher and
@@ -25,8 +26,7 @@ android {
         // not be, and this project has the configuration cache enabled.
         fun escapedConfigValue(name: String): String = providers.environmentVariable(name)
             .orElse(providers.gradleProperty(name))
-            .orElse("")
-            .get()
+            .getOrElse("")
             .replace("\\", "\\\\")
             .replace("\"", "\\\"")
 
@@ -35,10 +35,27 @@ android {
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"${escapedConfigValue("EXPO_PUBLIC_SUPABASE_ANON_KEY")}\"")
     }
 
+    signingConfigs {
+        create("release") {
+            val path = System.getenv("RECTO_KEYSTORE_PATH")
+            if (path != null) {
+                storeFile = file(path)
+                storePassword = System.getenv("RECTO_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("RECTO_KEY_ALIAS")
+                keyPassword = System.getenv("RECTO_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = if (System.getenv("RECTO_KEYSTORE_PATH") != null) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -91,5 +108,9 @@ dependencies {
     implementation(libs.mlkit.text.recognition)
     implementation(libs.mlkit.barcode.scanning)
     implementation(libs.revenuecat.purchases)
+    testImplementation(libs.junit)
+    testImplementation(libs.mockk)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.ktor.client.mock)
     debugImplementation(libs.androidx.ui.tooling)
 }

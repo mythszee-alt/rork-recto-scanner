@@ -1,13 +1,15 @@
 package com.rork.recto.ui.screens
 
 import android.app.Application
+import android.content.SharedPreferences
 import android.net.Uri
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.revenuecat.purchases.Package
 import com.rork.recto.BuildConfig
 import com.rork.recto.data.AuthRepository
 import com.rork.recto.data.BillingService
+import com.rork.recto.data.EncryptionKeyRepository
 import com.rork.recto.data.RectoSession
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -34,38 +36,45 @@ data class AppUiState(
     val isGuest: Boolean = false
 )
 
-class AppViewModel(application: Application) : AndroidViewModel(application) {
-    private val preferences = application.getSharedPreferences("recto_preferences", 0)
-    private val auth = AuthRepository(application)
+class AppViewModel(
+    application: Application,
+    private val auth: AuthRepository,
+    private val encryptionKeys: EncryptionKeyRepository
+) : ViewModel() {
+    private val preferences: SharedPreferences = application.getSharedPreferences("recto_preferences", 0)
     private val billing = BillingService()
     private val restored = auth.restoredSession()
     private val _uiState = MutableStateFlow(
         AppUiState(
             gate = when {
                 !preferences.getBoolean("onboarding_complete", false) -> AppGate.ONBOARDING
-                restored != null -> AppGate.PAYWALL
-                // Guest choice is remembered so the app doesn't bounce back to
-                // the sign-in wall on every launch.
-                preferences.getBoolean("guest_mode", false) -> AppGate.LIBRARY
-                else -> AppGate.AUTH
+                // Bypass forced auth and paywall for testing purposes.
+                // Users land directly in the library as guests if not signed in.
+                else -> AppGate.LIBRARY
             },
             session = restored,
-            isGuest = restored == null && preferences.getBoolean("guest_mode", false),
-            isFreeMode = restored == null && preferences.getBoolean("guest_mode", false)
+            isGuest = restored == null,
+            isFreeMode = restored == null
         )
     )
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
 
     init {
-        restored?.let { session ->
-            billing.identify(session.user.id)
-            refreshSubscription()
+        viewModelScope.launch {
+            val session = auth.validSession()
+            if (session != null) {
+                _uiState.update { it.copy(session = session) }
+                billing.identify(session.user.id)
+                refreshSubscription()
+            } else if (restored != null) {
+                signOut()
+            }
         }
     }
 
     fun completeOnboarding() {
         preferences.edit().putBoolean("onboarding_complete", true).apply()
-        _uiState.update { it.copy(gate = if (it.session == null) AppGate.AUTH else AppGate.PAYWALL) }
+        _uiState.update { it.copy(gate = AppGate.LIBRARY, isGuest = it.session == null, isFreeMode = it.session == null) }
     }
 
     /**
@@ -110,6 +119,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     if (session == null) {
                         _uiState.update { it.copy(isLoading = false, message = "Check your inbox to confirm your account, then sign in", authMode = AuthMode.SIGN_IN) }
                     } else {
+                        // Resolve and cache account encryption key while password is in memory
+                        val keyResult = encryptionKeys.resolve(session, password)
+                        if (keyResult.isFailure) {
+                            _uiState.update { it.copy(isLoading = false, message = "Account verified but could not unlock encryption. Please try again.") }
+                            return@fold
+                        }
                         billing.identify(session.user.id)
                         preferences.edit().putBoolean("guest_mode", false).apply()
                         _uiState.update { it.copy(isLoading = false, session = session, gate = AppGate.PAYWALL, isGuest = false) }
@@ -189,8 +204,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun requestAccountDeletion() {
-        val session = _uiState.value.session ?: return
         viewModelScope.launch {
+            val session = auth.validSession() ?: return@launch
             _uiState.update { it.copy(isLoading = true, message = null) }
             auth.requestAccountDeletion(session).fold(
                 onSuccess = {

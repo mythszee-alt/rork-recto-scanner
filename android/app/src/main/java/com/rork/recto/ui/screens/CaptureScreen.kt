@@ -68,7 +68,7 @@ import java.util.concurrent.TimeUnit
 fun CaptureScreen(
     navController: NavController,
     capturedCount: Int,
-    onPageCaptured: (String) -> Unit,
+    onPageCaptured: (String, Int, Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -176,7 +176,7 @@ fun CaptureScreen(
                             ImageCapture.OutputFileOptions.Builder(file).build(),
                             ContextCompat.getMainExecutor(context),
                             object : ImageCapture.OnImageSavedCallback {
-                                override fun onImageSaved(output: ImageCapture.OutputFileResults) { isCapturing = false; onPageCaptured(file.absolutePath) }
+                                override fun onImageSaved(output: ImageCapture.OutputFileResults) { isCapturing = false; onPageCaptured(file.absolutePath, sharpness, glare) }
                                 override fun onError(exception: ImageCaptureException) { isCapturing = false; error = "Capture failed. Keep the app open and try again." }
                             }
                         )

@@ -26,51 +26,60 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
-/**
- * Resolves the account-level document encryption key: generated once per
- * account and stored server-side in `encryption_keys` (RLS-protected — only
- * the owning authenticated user can read their own row), so any device
- * signed into the same account can fetch it and decrypt that account's
- * backups. Contrast with the old per-device Android Keystore key, which
- * could never decrypt anything on a second device or after reinstall.
- *
- * A local cache — itself protected by a (non-exportable, device-bound)
- * Keystore key — avoids re-fetching the account key on every launch. The
- * cache is just a performance/offline convenience; the server row is the
- * source of truth.
- */
-class EncryptionKeyRepository(context: Context) {
+class EncryptionKeyRepository(context: Context, private val client: HttpClient) {
     private val json = Json { ignoreUnknownKeys = true }
-    private val client = HttpClient(Android) {
-        install(ContentNegotiation) { json(json) }
-    }
     private val localCache = LocalKeyCache(context)
 
-    suspend fun resolve(session: RectoSession): Result<SecretKey> = runCatching {
-        // The cache is keyed to the signed-in user id so switching accounts
-        // on the same device (sign out, sign in as someone else) can never
-        // reuse the previous account's key.
+    suspend fun resolve(session: RectoSession, password: String? = null): Result<SecretKey> = runCatching {
         localCache.read(session.user.id)?.let { return@runCatching SecretKeySpec(it, "AES") }
 
-        val existing = fetchExisting(session)
-        if (existing != null) {
-            localCache.write(session.user.id, existing)
-            return@runCatching SecretKeySpec(existing, "AES")
+        val row = fetchKeyRow(session)
+        if (row != null) {
+            val salt = Base64.decode(row.salt ?: error("Missing salt"), Base64.NO_WRAP)
+            val kek = deriveKek(password ?: error("Password required to unlock your account for the first time on this device"), salt)
+            val unwrapped = unwrap(Base64.decode(row.wrappedKey ?: error("Missing key"), Base64.NO_WRAP), kek)
+            localCache.write(session.user.id, unwrapped)
+            return@runCatching SecretKeySpec(unwrapped, "AES")
         }
 
         val generated = ByteArray(32).also { SecureRandom().nextBytes(it) }
-        uploadNew(session, generated)
+        val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
+        val kek = deriveKek(password ?: error("Password required to set up your account encryption"), salt)
+        val wrapped = wrap(generated, kek)
+        
+        uploadNew(session, wrapped, salt)
         localCache.write(session.user.id, generated)
         SecretKeySpec(generated, "AES")
     }
 
-    fun clearLocalCache() = localCache.clear()
+    private fun deriveKek(password: String, salt: ByteArray): SecretKey {
+        val factory = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+        val spec = PBEKeySpec(password.toCharArray(), salt, 100000, 256)
+        return SecretKeySpec(factory.generateSecret(spec).encoded, "AES")
+    }
 
-    private suspend fun fetchExisting(session: RectoSession): ByteArray? {
+    private fun wrap(rawKey: ByteArray, kek: SecretKey): ByteArray {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, kek)
+        val ciphertext = cipher.doFinal(rawKey)
+        return byteArrayOf(cipher.iv.size.toByte()) + cipher.iv + ciphertext
+    }
+
+    private fun unwrap(wrapped: ByteArray, kek: SecretKey): ByteArray {
+        val ivSize = wrapped[0].toInt() and 0xff
+        val iv = wrapped.copyOfRange(1, 1 + ivSize)
+        val ciphertext = wrapped.copyOfRange(1 + ivSize, wrapped.size)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, kek, GCMParameterSpec(128, iv))
+        return cipher.doFinal(ciphertext)
+    }
+
+    private suspend fun fetchKeyRow(session: RectoSession): KeyRow? {
         val response = client.get(
-            "${BuildConfig.SUPABASE_URL}/rest/v1/encryption_keys?user_id=eq.${session.user.id}&select=wrapped_key"
+            "${BuildConfig.SUPABASE_URL}/rest/v1/encryption_keys?user_id=eq.${session.user.id}&select=wrapped_key,salt"
         ) {
             header("apikey", BuildConfig.SUPABASE_ANON_KEY)
             header(HttpHeaders.Authorization, "Bearer ${session.accessToken}")
@@ -78,17 +87,20 @@ class EncryptionKeyRepository(context: Context) {
         if (!response.status.isSuccess()) return null
         val text = response.body<String>()
         val rows = runCatching { json.decodeFromString<List<KeyRow>>(text) }.getOrNull().orEmpty()
-        val encoded = rows.firstOrNull()?.wrappedKey ?: return null
-        return Base64.decode(encoded, Base64.NO_WRAP)
+        return rows.firstOrNull()
     }
 
-    private suspend fun uploadNew(session: RectoSession, rawKey: ByteArray) {
+    private suspend fun uploadNew(session: RectoSession, wrappedKey: ByteArray, salt: ByteArray) {
         val response = client.post("${BuildConfig.SUPABASE_URL}/rest/v1/encryption_keys?on_conflict=user_id") {
             header("apikey", BuildConfig.SUPABASE_ANON_KEY)
             header(HttpHeaders.Authorization, "Bearer ${session.accessToken}")
             header(HttpHeaders.ContentType, ContentType.Application.Json)
             header("Prefer", "resolution=merge-duplicates")
-            setBody(KeyRow(userId = session.user.id, wrappedKey = Base64.encodeToString(rawKey, Base64.NO_WRAP)))
+            setBody(KeyRow(
+                userId = session.user.id, 
+                wrappedKey = Base64.encodeToString(wrappedKey, Base64.NO_WRAP),
+                salt = Base64.encodeToString(salt, Base64.NO_WRAP)
+            ))
         }
         check(response.status.isSuccess()) { "Could not register the account encryption key" }
     }
@@ -98,6 +110,7 @@ class EncryptionKeyRepository(context: Context) {
 private data class KeyRow(
     @SerialName("user_id") val userId: String? = null,
     @SerialName("wrapped_key") val wrappedKey: String? = null,
+    @SerialName("salt") val salt: String? = null
 )
 
 private class LocalKeyCache(context: Context) {

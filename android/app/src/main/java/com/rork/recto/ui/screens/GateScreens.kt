@@ -56,17 +56,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.revenuecat.purchases.Package
+import com.rork.recto.ui.theme.AppTheme
 import com.rork.recto.ui.theme.CalibrationCyan
 import com.rork.recto.ui.theme.RegistrationMagenta
 
-// Google sign-in needs the Google provider configured in the Supabase
-// dashboard (client ID/secret + the recto://auth redirect registered) before
-// it can work end to end. Until that's set up, keep email/password as the
-// only path so testers aren't stuck at a dead end. Flip back to true once
-// Google is configured.
-private const val GOOGLE_SIGN_IN_ENABLED = false
+// Google sign-in is now enabled for testing.
+private const val GOOGLE_SIGN_IN_ENABLED = true
 
 private data class OnboardingPage(val eyebrow: String, val title: String, val body: String, val icon: ImageVector, val accent: Color)
 
@@ -74,9 +72,9 @@ private data class OnboardingPage(val eyebrow: String, val title: String, val bo
 fun OnboardingScreen(onComplete: () -> Unit, modifier: Modifier = Modifier) {
     val pages = remember {
         listOf(
-            OnboardingPage("PROOFCHECK", "Know before you capture.", "Recto checks framing, blur, glare, skew and effective resolution while the paper is still in front of you.", Icons.Outlined.AutoAwesome, CalibrationCyan),
+            OnboardingPage("PROOFCHECK", "Know before you capture.", "Recto checks for blur and glare while the paper is still in front of you.", Icons.Outlined.AutoAwesome, CalibrationCyan),
             OnboardingPage("PRIVATE BY DESIGN", "Your desk stays yours.", "Scans are saved locally first. Optional cloud copies are encrypted before upload and isolated to your account.", Icons.Outlined.Lock, RegistrationMagenta),
-            OnboardingPage("VERIFIED REDACTION", "Black boxes are not enough.", "Recto flattens redactions into page pixels and issues a verification receipt only after the hidden content is checked.", Icons.Outlined.Shield, CalibrationCyan)
+            OnboardingPage("TEXT EXTRACTION", "Content at your fingertips.", "Extract text from any scan using on-device ML Kit OCR. Export as searchable PDF or plain text.", Icons.Outlined.AutoAwesome, CalibrationCyan)
         )
     }
     var page by remember { mutableIntStateOf(0) }
@@ -211,14 +209,14 @@ fun PaywallScreen(state: AppUiState, viewModel: AppViewModel, modifier: Modifier
                 ) {
                     Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("Scan with proof, not hope.", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black)
-                        Text("Unlock every format, encrypted backup and verified redaction.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Unlock every format, encrypted backup and searchable PDF export.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(11.dp)) {
                     FeatureLine(Icons.Outlined.AutoAwesome, "Live ProofCheck quality gate")
-                    FeatureLine(Icons.Outlined.Shield, "Verified destructive redaction")
+                    FeatureLine(Icons.Outlined.AutoAwesome, "Searchable PDF & Text Export")
                     FeatureLine(Icons.Outlined.CloudDone, "Encrypted account backup")
-                    FeatureLine(Icons.Outlined.Lock, "PDF, searchable PDF, JPEG, PNG, WebP and ZIP")
+                    FeatureLine(Icons.Outlined.Lock, "PDF, JPEG, PNG, WebP and ZIP formats")
                 }
                 Text("CHOOSE YOUR PLAN", style = MaterialTheme.typography.labelLarge, color = CalibrationCyan, fontWeight = FontWeight.Black)
                 when {
@@ -316,5 +314,29 @@ private fun StaticPlan(title: String, price: String, badge: String?) {
             badge?.let { Text(it, color = RegistrationMagenta, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black) }
         }
         Text(price, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun OnboardingPreview() {
+    AppTheme {
+        OnboardingScreen(onComplete = {})
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun AuthPreview() {
+    AppTheme {
+        AuthScreen(state = AppUiState(isAccountServiceConfigured = true), viewModel = androidx.lifecycle.viewmodel.compose.viewModel())
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun PaywallPreview() {
+    AppTheme {
+        PaywallScreen(state = AppUiState(isBillingConfigured = true), viewModel = androidx.lifecycle.viewmodel.compose.viewModel())
     }
 }

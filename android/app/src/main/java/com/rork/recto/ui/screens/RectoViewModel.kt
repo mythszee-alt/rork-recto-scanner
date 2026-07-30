@@ -1,7 +1,8 @@
 package com.rork.recto.ui.screens
 
 import android.app.Application
-import androidx.lifecycle.AndroidViewModel
+import android.content.SharedPreferences
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.rork.recto.data.AuthRepository
 import com.rork.recto.data.CloudSyncService
@@ -19,6 +20,9 @@ import java.io.File
 import java.util.UUID
 
 @Serializable
+data class PageQuality(val sharpness: Int, val glare: Int)
+
+@Serializable
 data class RectoDocument(
     val id: String,
     val title: String,
@@ -28,6 +32,8 @@ data class RectoDocument(
     val isVerified: Boolean,
     val accent: DocumentAccent,
     val pagePaths: List<String> = emptyList(),
+    val pageQualities: List<PageQuality> = emptyList(),
+    val cloudPath: String? = null,
     val isDeleted: Boolean = false
 )
 
@@ -40,6 +46,7 @@ data class RectoUiState(
     val searchQuery: String = "",
     val proofScore: Int = 94,
     val capturedPages: List<String> = emptyList(),
+    val capturedQualities: List<PageQuality> = emptyList(),
     val message: String? = null,
     val isSyncing: Boolean = false,
     val isSyncError: Boolean = false
@@ -48,7 +55,7 @@ data class RectoUiState(
 sealed interface RectoAction {
     data class SetFilter(val filter: String) : RectoAction
     data class SetSearch(val query: String) : RectoAction
-    data class AddPage(val path: String) : RectoAction
+    data class AddPage(val path: String, val sharpness: Int = 0, val glare: Int = 0) : RectoAction
     data class RemovePage(val index: Int) : RectoAction
     data class MovePage(val from: Int, val to: Int) : RectoAction
     data class SaveCapture(val title: String) : RectoAction
@@ -56,23 +63,28 @@ sealed interface RectoAction {
     data class Duplicate(val id: String) : RectoAction
     data class Delete(val id: String) : RectoAction
     data class Restore(val id: String) : RectoAction
+    data class DeleteForever(val id: String) : RectoAction
     data object ClearCapture : RectoAction
     data object Capture : RectoAction
     data object RestoreFromCloud : RectoAction
 }
 
-class RectoViewModel(application: Application) : AndroidViewModel(application) {
-    private val preferences = application.getSharedPreferences("recto_documents", 0)
+class RectoViewModel(
+    application: Application,
+    private val authRepository: AuthRepository,
+    private val cloudSync: CloudSyncService,
+    private val encryptionKeys: EncryptionKeyRepository
+) : ViewModel() {
+    private val preferences: SharedPreferences = application.getSharedPreferences("recto_documents", 0)
     private val json = Json { ignoreUnknownKeys = true }
-    private val authRepository = AuthRepository(application)
-    private val cloudSync = CloudSyncService(application)
-    private val encryptionKeys = EncryptionKeyRepository(application)
     private val _uiState = MutableStateFlow(RectoUiState(documents = loadDocuments()))
     val uiState: StateFlow<RectoUiState> = _uiState.asStateFlow()
 
     init {
-        authRepository.restoredSession()?.let { session ->
-            viewModelScope.launch { restoreFromCloud(session) }
+        viewModelScope.launch {
+            authRepository.validSession()?.let { session ->
+                restoreFromCloud(session)
+            }
         }
     }
 
@@ -80,12 +92,26 @@ class RectoViewModel(application: Application) : AndroidViewModel(application) {
         when (action) {
             is RectoAction.SetFilter -> _uiState.update { it.copy(selectedFilter = action.filter) }
             is RectoAction.SetSearch -> _uiState.update { it.copy(searchQuery = action.query) }
-            is RectoAction.AddPage -> _uiState.update { it.copy(capturedPages = it.capturedPages + action.path, proofScore = 98) }
-            is RectoAction.RemovePage -> _uiState.update { state -> state.copy(capturedPages = state.capturedPages.filterIndexed { index, _ -> index != action.index }) }
+            is RectoAction.AddPage -> _uiState.update {
+                val newPages = it.capturedPages + action.path
+                val newQualities = it.capturedQualities + PageQuality(action.sharpness, action.glare)
+                val avgQuality = if (newQualities.isNotEmpty()) newQualities.map { q -> (q.sharpness + (100 - q.glare)) / 2 }.average().toInt() else 94
+                it.copy(capturedPages = newPages, capturedQualities = newQualities, proofScore = avgQuality)
+            }
+            is RectoAction.RemovePage -> _uiState.update { state ->
+                val newPages = state.capturedPages.filterIndexed { index, _ -> index != action.index }
+                val newQualities = state.capturedQualities.filterIndexed { index, _ -> index != action.index }
+                val avgQuality = if (newQualities.isNotEmpty()) newQualities.map { q -> (q.sharpness + (100 - q.glare)) / 2 }.average().toInt() else 94
+                state.copy(capturedPages = newPages, capturedQualities = newQualities, proofScore = avgQuality)
+            }
             is RectoAction.MovePage -> _uiState.update { state ->
                 val pages = state.capturedPages.toMutableList()
-                if (action.from in pages.indices && action.to in pages.indices) pages.add(action.to, pages.removeAt(action.from))
-                state.copy(capturedPages = pages)
+                val qualities = state.capturedQualities.toMutableList()
+                if (action.from in pages.indices && action.to in pages.indices) {
+                    pages.add(action.to, pages.removeAt(action.from))
+                    qualities.add(action.to, qualities.removeAt(action.from))
+                }
+                state.copy(capturedPages = pages, capturedQualities = qualities)
             }
             is RectoAction.SaveCapture -> saveCapture(action.title)
             is RectoAction.Rename -> updateDocuments { documents -> documents.map { if (it.id == action.id) it.copy(title = action.title) else it } }
@@ -100,10 +126,23 @@ class RectoViewModel(application: Application) : AndroidViewModel(application) {
                 updateDocuments { documents -> documents.map { if (it.id == action.id) it.copy(isDeleted = false) else it } }
                 syncDeletionState(action.id, deleted = false)
             }
-            RectoAction.ClearCapture -> _uiState.update { it.copy(capturedPages = emptyList()) }
+            is RectoAction.DeleteForever -> {
+                val document = _uiState.value.documents.firstOrNull { it.id == action.id }
+                updateDocuments { documents -> documents.filter { it.id != action.id } }
+                document?.let { doc ->
+                    viewModelScope.launch {
+                        doc.pagePaths.forEach { File(it).delete() }
+                        val session = authRepository.validSession() ?: return@launch
+                        cloudSync.deleteForever(session, doc.id, doc.cloudPath ?: "")
+                    }
+                }
+            }
+            RectoAction.ClearCapture -> _uiState.update { it.copy(capturedPages = emptyList(), capturedQualities = emptyList(), proofScore = 94) }
             RectoAction.Capture -> Unit
-            RectoAction.RestoreFromCloud -> authRepository.restoredSession()?.let { session ->
-                viewModelScope.launch { restoreFromCloud(session) }
+            RectoAction.RestoreFromCloud -> viewModelScope.launch {
+                authRepository.validSession()?.let { session ->
+                    restoreFromCloud(session)
+                }
             }
         }
     }
@@ -139,37 +178,43 @@ class RectoViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun syncDeletionState(documentId: String, deleted: Boolean) {
-        val session = authRepository.restoredSession() ?: return
-        viewModelScope.launch { cloudSync.syncDeletion(session, documentId, deleted) }
+        viewModelScope.launch {
+            val session = authRepository.validSession() ?: return@launch
+            cloudSync.syncDeletion(session, documentId, deleted)
+        }
     }
 
     private fun saveCapture(title: String) {
-        val pages = _uiState.value.capturedPages
+        val state = _uiState.value
+        val pages = state.capturedPages
         if (pages.isEmpty()) return
         val document = RectoDocument(
             id = UUID.randomUUID().toString(),
             title = title.ifBlank { "Untitled scan" },
             detail = "JUST NOW · ON DEVICE",
             pages = pages.size,
-            quality = _uiState.value.proofScore,
-            isVerified = false,
-            accent = DocumentAccent.CYAN,
-            pagePaths = pages
+            quality = state.proofScore,
+            isVerified = state.proofScore >= 85,
+            accent = if (state.proofScore >= 85) DocumentAccent.CYAN else DocumentAccent.NEUTRAL,
+            pagePaths = pages,
+            pageQualities = state.capturedQualities
         )
         updateDocuments { listOf(document) + it }
-        _uiState.update { it.copy(capturedPages = emptyList(), message = "Document saved on this device", isSyncError = false) }
-        authRepository.restoredSession()?.let { session ->
-            viewModelScope.launch {
-                val key = encryptionKeys.resolve(session).getOrNull()
-                if (key == null) {
-                    _uiState.update { state -> state.copy(isSyncError = true, message = "Saved locally. Encrypted backup will retry when online.") }
-                    return@launch
-                }
-                cloudSync.upload(session, document, key).fold(
-                    onSuccess = { updateDocuments { documents -> documents.map { if (it.id == document.id) it.copy(detail = "JUST NOW · ENCRYPTED BACKUP") else it } } },
-                    onFailure = { _uiState.update { state -> state.copy(isSyncError = true, message = "Saved locally. Encrypted backup will retry when online.") } }
-                )
+        _uiState.update { it.copy(capturedPages = emptyList(), capturedQualities = emptyList(), message = "Document saved on this device", isSyncError = false) }
+        viewModelScope.launch {
+            val session = authRepository.validSession() ?: return@launch
+            val key = encryptionKeys.resolve(session).getOrNull()
+            if (key == null) {
+                _uiState.update { state -> state.copy(isSyncError = true, message = "Saved locally. Encrypted backup will retry when online.") }
+                return@launch
             }
+            cloudSync.upload(session, document, key).fold(
+                onSuccess = {
+                    val objectPath = "${session.user.id}/${document.id}.recto"
+                    updateDocuments { documents -> documents.map { if (it.id == document.id) it.copy(detail = "JUST NOW · ENCRYPTED BACKUP", cloudPath = objectPath) else it } }
+                },
+                onFailure = { _uiState.update { state -> state.copy(isSyncError = true, message = "Saved locally. Encrypted backup will retry when online.") } }
+            )
         }
     }
 

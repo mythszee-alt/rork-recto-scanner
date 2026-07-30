@@ -13,6 +13,7 @@ import io.ktor.client.request.header
 import io.ktor.client.request.patch
 import io.ktor.client.request.post
 import io.ktor.client.request.put
+import io.ktor.client.request.delete
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -36,8 +37,7 @@ import javax.crypto.spec.GCMParameterSpec
  * and download them back down, using the account-level key resolved by
  * [EncryptionKeyRepository] rather than a device-locked one.
  */
-class CloudSyncService(private val context: Context) {
-    private val client = HttpClient(Android)
+class CloudSyncService(private val context: Context, private val client: HttpClient) {
     private val json = Json { ignoreUnknownKeys = true }
 
     suspend fun upload(session: RectoSession, document: RectoDocument, key: SecretKey): Result<Unit> = runCatching {
@@ -97,6 +97,7 @@ class CloudSyncService(private val context: Context) {
             isVerified = false,
             accent = DocumentAccent.NEUTRAL,
             pagePaths = pagePaths,
+            cloudPath = remote.encryptedObjectPath
         )
     }
 
@@ -112,6 +113,20 @@ class CloudSyncService(private val context: Context) {
             setBody(Json.encodeToString(DeletionPatch.serializer(), DeletionPatch(if (deleted) nowIso else null, nowIso)))
         }
         check(response.status.isSuccess()) { "Could not sync deletion state" }
+    }
+
+    suspend fun deleteForever(session: RectoSession, documentId: String, objectPath: String): Result<Unit> = runCatching {
+        if (BuildConfig.SUPABASE_URL.isBlank()) return@runCatching
+        val metadata = client.delete("${BuildConfig.SUPABASE_URL}/rest/v1/documents?id=eq.$documentId&user_id=eq.${session.user.id}") {
+            authHeaders(session)
+        }
+        check(metadata.status.isSuccess()) { "Could not delete metadata" }
+        if (objectPath.isNotBlank()) {
+            val storage = client.delete("${BuildConfig.SUPABASE_URL}/storage/v1/object/encrypted-documents/$objectPath") {
+                authHeaders(session)
+            }
+            check(storage.status.isSuccess()) { "Could not delete cloud object" }
+        }
     }
 
     private fun isoNow(): String =

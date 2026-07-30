@@ -32,7 +32,11 @@ data class RectoSession(
     @SerialName("access_token") val accessToken: String,
     @SerialName("refresh_token") val refreshToken: String,
     @SerialName("expires_in") val expiresIn: Long = 3600,
-    val user: AuthUser
+    val user: AuthUser,
+    /** Absolute expiry timestamp in epoch-seconds. */
+    val expiresAt: Long = (System.currentTimeMillis() / 1000) + expiresIn,
+    /** Derived key-encryption key (Base64), only present after login/refresh if derivation succeeded. */
+    var kek: String? = null
 )
 
 @Serializable
@@ -41,11 +45,8 @@ data class AuthUser(val id: String, val email: String? = null)
 @Serializable
 private data class AuthError(val message: String? = null, @SerialName("error_description") val description: String? = null)
 
-class AuthRepository(context: Context) {
+class AuthRepository(context: Context, private val client: HttpClient) {
     private val json = Json { ignoreUnknownKeys = true }
-    private val client = HttpClient(Android) {
-        install(ContentNegotiation) { json(json) }
-    }
     private val sessionStore = SecureSessionStore(context)
 
     fun restoredSession(): RectoSession? = sessionStore.read()?.let {
@@ -61,6 +62,23 @@ class AuthRepository(context: Context) {
         path = "/auth/v1/token?grant_type=password",
         body = Credentials(email, password)
     )
+
+    suspend fun refreshSession(refreshToken: String): Result<RectoSession?> = request(
+        path = "/auth/v1/token?grant_type=refresh_token",
+        body = RefreshCredentials(refreshToken)
+    )
+
+    suspend fun validSession(): RectoSession? {
+        val current = restoredSession() ?: return null
+        val now = System.currentTimeMillis() / 1000
+        // Refresh if expired or expiring in the next minute
+        if (current.expiresAt > now + 60) return current
+
+        return refreshSession(current.refreshToken).getOrNull() ?: run {
+            signOut(current)
+            null
+        }
+    }
 
     suspend fun sendPasswordReset(email: String): Result<Unit> {
         return runCatching {
@@ -174,6 +192,9 @@ class AuthRepository(context: Context) {
         return Regex("\\\"sub\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"").find(decoded)?.groupValues?.get(1)
     }
 }
+
+@Serializable
+private data class RefreshCredentials(@SerialName("refresh_token") val refreshToken: String)
 
 @Serializable
 private data class Credentials(val email: String, val password: String)

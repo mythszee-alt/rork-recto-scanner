@@ -12,10 +12,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
 import com.rork.recto.data.ImportService
 import com.rork.recto.ui.screens.AppGate
 import com.rork.recto.ui.screens.AppViewModel
@@ -26,22 +22,23 @@ import com.rork.recto.ui.screens.DocumentScreen
 import com.rork.recto.ui.screens.HomeScreen
 import com.rork.recto.ui.screens.OnboardingScreen
 import com.rork.recto.ui.screens.PaywallScreen
-import com.rork.recto.ui.screens.ReceiptScreen
 import com.rork.recto.ui.screens.ReviewScreen
 import com.rork.recto.ui.screens.RectoAction
 import com.rork.recto.ui.screens.RectoViewModel
 import com.rork.recto.ui.screens.TextExtractScreen
+import com.rork.recto.ui.screens.TrashScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.koin.androidx.compose.koinViewModel
 
 /** Upper bound for a single gallery import, matching a sane multi-page scan. */
 private const val MAX_IMPORT_PAGES = 20
 
 @Composable
 fun AppNavigation(authCallback: StateFlow<Uri?>) {
-    val appViewModel: AppViewModel = viewModel()
+    val appViewModel: AppViewModel = koinViewModel()
     val appState by appViewModel.uiState.collectAsStateWithLifecycle()
     val callback by authCallback.collectAsStateWithLifecycle()
     LaunchedEffect(callback) { callback?.let(appViewModel::acceptOAuth) }
@@ -59,7 +56,7 @@ fun AppNavigation(authCallback: StateFlow<Uri?>) {
 @Composable
 private fun MainNavigation(appState: com.rork.recto.ui.screens.AppUiState, appViewModel: AppViewModel) {
     val navController = rememberNavController()
-    val viewModel: RectoViewModel = viewModel()
+    val viewModel: RectoViewModel = koinViewModel()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val importer = remember(context) { ImportService(context) }
@@ -98,7 +95,7 @@ private fun MainNavigation(appState: com.rork.recto.ui.screens.AppUiState, appVi
             CaptureScreen(
                 navController = navController,
                 capturedCount = uiState.capturedPages.size,
-                onPageCaptured = { path -> viewModel.onAction(RectoAction.AddPage(path)) }
+                onPageCaptured = { path, sharpness, glare -> viewModel.onAction(RectoAction.AddPage(path, sharpness, glare)) }
             )
         }
         composable("review") {
@@ -127,7 +124,13 @@ private fun MainNavigation(appState: com.rork.recto.ui.screens.AppUiState, appVi
             }
         }
         composable("barcode") { BarcodeScannerScreen(onBack = navController::popBackStack) }
-        composable("receipt") { ReceiptScreen(navController = navController) }
+        composable("trash") {
+            TrashScreen(
+                documents = uiState.documents.filter { it.isDeleted },
+                onAction = viewModel::onAction,
+                onBack = navController::popBackStack
+            )
+        }
         composable("account") { com.rork.recto.ui.screens.AccountScreen(state = appState, appViewModel = appViewModel, onBack = navController::popBackStack) }
     }
 }

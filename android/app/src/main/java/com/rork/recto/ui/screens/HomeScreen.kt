@@ -25,6 +25,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Person
@@ -49,8 +50,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import androidx.navigation.compose.rememberNavController
+import com.rork.recto.ui.theme.AppTheme
 import com.rork.recto.ui.theme.CalibrationCyan
 import com.rork.recto.ui.theme.Hairline
 import com.rork.recto.ui.theme.RegistrationMagenta
@@ -89,7 +93,10 @@ fun HomeScreen(
                         Text("RECTO", style = MaterialTheme.typography.labelLarge, color = CalibrationCyan)
                         Text("Paper, measured.", style = MaterialTheme.typography.headlineLarge)
                     }
-                    IconButton(onClick = { navController.navigate("account") }) { Icon(Icons.Rounded.Person, "Account") }
+                    Row {
+                        IconButton(onClick = { navController.navigate("trash") }) { Icon(Icons.Rounded.Delete, "Trash") }
+                        IconButton(onClick = { navController.navigate("account") }) { Icon(Icons.Rounded.Person, "Account") }
+                    }
                 }
                 OutlinedTextField(
                     value = uiState.searchQuery,
@@ -248,5 +255,38 @@ private fun DocumentRow(document: RectoDocument, onClick: () -> Unit) {
             }
             IconButton(onClick = onClick) { Icon(Icons.Rounded.MoreHoriz, "Open document options") }
         }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun HomePreview() {
+    val mockDocuments = listOf(
+        RectoDocument(
+            id = "1",
+            title = "Tax Receipt 2026",
+            detail = "JUST NOW · ON DEVICE",
+            pages = 1,
+            quality = 98,
+            isVerified = true,
+            accent = DocumentAccent.CYAN
+        ),
+        RectoDocument(
+            id = "2",
+            title = "Passport Scan",
+            detail = "2 DAYS AGO · ENCRYPTED BACKUP",
+            pages = 2,
+            quality = 92,
+            isVerified = false,
+            accent = DocumentAccent.NEUTRAL
+        )
+    )
+    AppTheme {
+        HomeScreen(
+            navController = rememberNavController(),
+            uiState = RectoUiState(documents = mockDocuments),
+            onAction = {},
+            onImportImages = {}
+        )
     }
 }
