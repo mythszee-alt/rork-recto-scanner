@@ -15,15 +15,24 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
-        fun escapedEnvironmentValue(name: String): String = providers.environmentVariable(name)
+        // Config comes from an environment variable (how Rork/CI inject it), or
+        // failing that a Gradle property. The Gradle-property fallback exists
+        // because Android Studio is usually launched from a desktop launcher and
+        // so does not inherit shell exports — put the values in
+        // ~/.gradle/gradle.properties (outside this repo, so they can never be
+        // committed) and local builds pick them up. See docs/LOCAL_SETUP.md.
+        // Both providers are configuration-cache safe; reading a file here would
+        // not be, and this project has the configuration cache enabled.
+        fun escapedConfigValue(name: String): String = providers.environmentVariable(name)
+            .orElse(providers.gradleProperty(name))
             .orElse("")
             .get()
             .replace("\\", "\\\\")
             .replace("\"", "\\\"")
 
-        buildConfigField("String", "REVENUECAT_API_KEY", "\"${escapedEnvironmentValue("EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY")}\"")
-        buildConfigField("String", "SUPABASE_URL", "\"${escapedEnvironmentValue("EXPO_PUBLIC_SUPABASE_URL")}\"")
-        buildConfigField("String", "SUPABASE_ANON_KEY", "\"${escapedEnvironmentValue("EXPO_PUBLIC_SUPABASE_ANON_KEY")}\"")
+        buildConfigField("String", "REVENUECAT_API_KEY", "\"${escapedConfigValue("EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY")}\"")
+        buildConfigField("String", "SUPABASE_URL", "\"${escapedConfigValue("EXPO_PUBLIC_SUPABASE_URL")}\"")
+        buildConfigField("String", "SUPABASE_ANON_KEY", "\"${escapedConfigValue("EXPO_PUBLIC_SUPABASE_ANON_KEY")}\"")
     }
 
     buildTypes {
