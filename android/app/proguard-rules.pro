@@ -7,6 +7,8 @@
 
 # Ktor
 -keep class io.ktor.** { *; }
+-dontwarn java.lang.management.**
+-dontwarn io.ktor.util.debug.**
 
 # ML Kit
 -keep class com.google.mlkit.** { *; }

@@ -149,7 +149,7 @@ class AuthRepository(context: Context, private val client: HttpClient) {
         sessionStore.clear()
     }
 
-    private suspend fun request(path: String, body: Credentials): Result<RectoSession?> = runCatching {
+    private suspend fun request(path: String, body: Any): Result<RectoSession?> = runCatching {
         requireConfigured()
         val response = client.post("${BuildConfig.SUPABASE_URL}$path") {
             header("apikey", BuildConfig.SUPABASE_ANON_KEY)
