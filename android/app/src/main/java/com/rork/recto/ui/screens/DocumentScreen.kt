@@ -20,6 +20,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.PictureAsPdf
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material3.Button
@@ -95,6 +96,26 @@ fun DocumentScreen(
         }
     }
 
+    fun generatePdf(onReady: (File) -> Unit) {
+        isExporting = true
+        message = "Generating PDF…"
+        scope.launch {
+            val result = withContext(Dispatchers.IO) { exporter.create(document, ExportFormat.PDF, quality.toInt(), colorMode) }
+            isExporting = false
+            result.fold(onSuccess = onReady, onFailure = { message = it.message ?: "PDF export failed" })
+        }
+    }
+
+    fun shareFile(file: File) {
+        val uri: Uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+        val mime = if (file.extension == "zip") "application/zip" else ExportFormat.PDF.mimeType
+        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+            type = mime
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }, "Share ${document.title}"))
+    }
+
     Scaffold(
         modifier = modifier,
         topBar = { TopAppBar(title = { Text(document.title) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") } }) }
@@ -118,6 +139,14 @@ fun DocumentScreen(
             Text("Image quality ${quality.toInt()}%")
             Slider(value = quality, onValueChange = { quality = it }, valueRange = 40f..100f, enabled = format !in setOf(ExportFormat.PDF, ExportFormat.SEARCHABLE_PDF, ExportFormat.PNG))
             message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+            Button(
+                onClick = { generatePdf { file -> shareFile(file) } },
+                enabled = !isExporting,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Outlined.PictureAsPdf, null)
+                Text(if (isExporting) "  GENERATING PDF…" else "  EXPORT AS PDF & SHARE")
+            }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick = {
                     generate { file ->
@@ -126,16 +155,7 @@ fun DocumentScreen(
                         saveLauncher.launch(Intent(Intent.ACTION_CREATE_DOCUMENT).apply { type = mime; putExtra(Intent.EXTRA_TITLE, file.name); addCategory(Intent.CATEGORY_OPENABLE) })
                     }
                 }, enabled = !isExporting, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.Download, null); Text("  SAVE") }
-                Button(onClick = {
-                    generate { file ->
-                        val uri: Uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
-                        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-                            type = if (file.extension == "zip") "application/zip" else format.mimeType
-                            putExtra(Intent.EXTRA_STREAM, uri)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }, "Share ${document.title}"))
-                    }
-                }, enabled = !isExporting, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.Share, null); Text(if (isExporting) "  WORKING" else "  SHARE") }
+                Button(onClick = { generate { file -> shareFile(file) } }, enabled = !isExporting, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.Share, null); Text(if (isExporting) "  WORKING" else "  SHARE") }
             }
             OutlinedButton(onClick = onExtractText, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Outlined.TextFields, null); Text("  EXTRACT TEXT (OCR)")
